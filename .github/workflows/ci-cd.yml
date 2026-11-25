@@ -1,0 +1,85 @@
+name: Citizen Registry CI/CD
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  build-and-test:
+    name: Build, Unit Tests & API/Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Compile source and test code
+        run: mvn -B clean test-compile
+
+      - name: Run unit tests
+        run: mvn -B test
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: citizen-service/target/surefire-reports/
+          if-no-files-found: error
+
+      - name: Package and run API/integration tests
+        run: mvn -B verify -DskipUnitTests=true
+
+      - name: Upload API/integration test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-reports
+          path: citizen-service/target/failsafe-reports/
+          if-no-files-found: error
+
+      - name: Upload executable JAR artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: citizen-registry-executables
+          path: |
+            citizen-service/target/citizen-service-*.jar
+            citizen-client/target/citizen-client-*.jar
+            !**/original-*.jar
+          if-no-files-found: error
+
+  release:
+    name: Publish Pre-Release Executables
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download executable JAR artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: citizen-registry-executables
+          path: dist
+
+      - name: Create GitHub Pre-Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-dev.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Citizen Registry v1.0.0-dev.${{ github.run_number }}
+          body: |
+            Automated early pre-release built from branch `develop`.
+            - Commit: `${{ github.sha }}`
+            - Run: `#${{ github.run_number }}`
+          prerelease: true
+          files: |
+            dist/**/*.jar
